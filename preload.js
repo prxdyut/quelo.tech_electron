@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setBearerToken: (token) => ipcRenderer.invoke('set-bearer-token', token),
   setApiBaseUrl: (url) => ipcRenderer.invoke('set-api-base-url', url),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
   fetchNotePreviews: (noteIds) => ipcRenderer.invoke('fetch-note-previews', noteIds),
   onSyncStatus: (callback) => ipcRenderer.on('sync-status', (event, data) => callback(data)),
   onWatchStarted: (callback) => ipcRenderer.on('watch-started', (event, data) => callback(data)),
@@ -33,7 +34,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Session Management APIs
   session: {
     getInfo: () => ipcRenderer.invoke('session-get-info'),
-    reset: (subject, topic, endDateTime, title) => ipcRenderer.invoke('session-reset', { subject, topic, endDateTime, title })
+    reset: (subject, topic, endDateTime, title) => ipcRenderer.invoke('session-reset', { subject, topic, endDateTime, title }),
+    setCurrent: (sessionId) => ipcRenderer.invoke('session-set-current', { sessionId }),
+    onSessionSelected: (callback) => ipcRenderer.on('session-selected', (event, session) => callback(session))
   },
   
   // Upload Records APIs
@@ -67,6 +70,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveAsNotes: (paths) => ipcRenderer.invoke('captures-save-as-notes', paths),
     getPath: () => ipcRenderer.invoke('captures-get-path'),
     retryUpload: (filePath) => ipcRenderer.invoke('captures-retry-upload', filePath),
-    retryAll: () => ipcRenderer.invoke('captures-retry-all')
+    retryAll: () => ipcRenderer.invoke('captures-retry-all'),
+    onCapturesChanged: (callback) => ipcRenderer.on('captures-changed', () => callback())
+  },
+
+  // Sessions APIs
+  sessions: {
+    getAll: (params) => ipcRenderer.invoke('sessions-get-all', params)
+  },
+
+  // Session Overlay APIs
+  sessionOverlay: {
+    show: () => ipcRenderer.invoke('open-session-overlay'),
+    close: () => ipcRenderer.invoke('close-session-overlay')
+  },
+
+  // Network and Sync APIs
+  network: {
+    getStatus: () => ipcRenderer.invoke('get-network-status'),
+    onStatusChanged: (callback) => ipcRenderer.on('network-status-changed', (event, data) => callback(data))
+  },
+
+  sync: {
+    getQueueStats: () => ipcRenderer.invoke('get-sync-queue-stats'),
+    processQueue: () => ipcRenderer.invoke('process-sync-queue'),
+    clearQueue: () => ipcRenderer.invoke('clear-sync-queue'),
+    onCompleted: (callback) => ipcRenderer.on('sync-completed', (event, data) => callback(data))
+  },
+
+  cache: {
+    getStats: () => ipcRenderer.invoke('get-cache-stats'),
+    clear: () => ipcRenderer.invoke('clear-cache'),
+    cleanExpired: () => ipcRenderer.invoke('clean-expired-cache')
   }
 });

@@ -54,6 +54,7 @@ class CaptureService {
       
       // Session ID is required
       const sessionId = this.getSessionId();
+      console.log(`[CaptureService] Retrieved sessionId: ${sessionId}`);
       if (!sessionId) {
         console.error('[CaptureService] sessionId is required but not available');
         throw new Error('Session ID is required for capture upload');

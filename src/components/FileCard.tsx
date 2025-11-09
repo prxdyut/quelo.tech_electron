@@ -2,6 +2,7 @@ import { FileIcon, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-reac
 import { cn, formatBytes, formatDate, getFileIcon } from '@/lib/utils';
 import type { FileItem } from '@/types';
 import * as Icons from 'lucide-react';
+import { useState } from 'react';
 
 interface FileCardProps {
   file: FileItem;
@@ -10,6 +11,8 @@ interface FileCardProps {
 export function FileCard({ file }: FileCardProps) {
   const iconName = getFileIcon(file.name);
   const IconComponent = (Icons as any)[iconName] || FileIcon;
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
 console.log('Rendering FileCard for file:', file);
   const getStatusConfig = () => {
     switch (file.status) {
@@ -47,16 +50,33 @@ console.log('Rendering FileCard for file:', file);
     <div className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-xl overflow-hidden hover:border-[#2a2a2a] transition-all group cursor-pointer">
       {/* Preview Image */}
       {file.preview && (
-        <div className="w-full h-40 bg-[#1a1a1a] overflow-hidden">
+        <div className="w-full h-40 bg-[#1a1a1a] overflow-hidden relative">
+          {/* Loading Skeleton */}
+          {imageLoading && !imageError && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-gray-600 animate-spin" />
+            </div>
+          )}
+          {/* Actual Image */}
           <img 
             src={file.preview} 
             alt={file.name}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              // Hide image if it fails to load
-              e.currentTarget.style.display = 'none';
+            className={cn(
+              "w-full h-full object-cover transition-opacity duration-200",
+              imageLoading ? "opacity-0" : "opacity-100"
+            )}
+            onLoad={() => setImageLoading(false)}
+            onError={() => {
+              setImageLoading(false);
+              setImageError(true);
             }}
           />
+          {/* Error State - show file icon if preview fails */}
+          {imageError && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <FileIcon className="w-12 h-12 text-gray-600 opacity-30" />
+            </div>
+          )}
         </div>
       )}
       

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('overlayAPI', {
   closeOverlay: () => ipcRenderer.invoke('close-overlay'),
   setIgnoreMouseEvents: (ignore) => ipcRenderer.send('set-ignore-mouse-events', ignore),
   openMainWindow: () => ipcRenderer.invoke('open-main-window'),
+  openSessionOverlay: () => ipcRenderer.invoke('open-session-overlay'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   toggleSync: () => ipcRenderer.invoke('toggle-sync'),
   restartSync: () => ipcRenderer.invoke('restart-sync'),

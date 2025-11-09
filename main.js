@@ -7,17 +7,25 @@ const uploadService = require('./uploadService');
 const authService = require('./authService');
 const captureService = require('./captureService');
 const AudioRecordingService = require('./audioRecordingService');
+const SessionsService = require('./sessionsService');
+const ApiService = require('./apiService');
+const SyncQueueService = require('./syncQueueService');
 const config = require('./config');
 
 let mainWindow;
 let overlayWindow = null;
+let sessionOverlayWindow = null;
 let tray = null;
 let watcher = null;
 let watchedFolder = null;
 let audioRecorder = null;
 let audioRecordingService = null;
+let sessionsService = null;
+let apiService = null;
+let syncQueueService = null;
 let recordingChunks = [];
 let recordingStream = null;
+let isOnline = true;
 let syncStats = {
   totalFiles: 0,
   syncedFiles: 0,
@@ -48,6 +56,9 @@ let sessionData = {
   title: null,
   status: null
 };
+
+// Current session from React app (takes priority)
+let reactAppCurrentSessionId = null;
 
 // Create session with backend
 async function createSessionWithBackend(subject, topic, title = null) {
@@ -145,7 +156,13 @@ async function endSessionWithBackend(sessionId, endTime) {
 function getSessionId() {
   const now = Date.now();
   
-  // Check if session exists and is valid
+  // First priority: use React app's current session if available
+  if (reactAppCurrentSessionId) {
+    console.log(`[Session] Using React app's current sessionId: ${reactAppCurrentSessionId}`);
+    return reactAppCurrentSessionId;
+  }
+  
+  // Fallback to sessionData
   if (sessionData.sessionId && sessionData.sessionStartTime) {
     // Check if we've passed the end time
     if (sessionData.endDateTime) {
@@ -158,10 +175,12 @@ function getSessionId() {
       }
     }
     
+    console.log(`[Session] Returning active sessionId from sessionData: ${sessionData.sessionId}`);
     return sessionData.sessionId;
   }
   
   // No active session
+  console.log('[Session] No active session available');
   return null;
 }
 
@@ -271,6 +290,9 @@ const failedUploadsPath = path.join(app.getPath('userData'), 'failed-uploads.jso
 // Track failed uploads
 let failedUploads = [];
 
+// Track uploads in progress
+let uploadsInProgress = [];
+
 // Ensure captures directory exists
 if (!fs.existsSync(capturesPath)) {
   fs.mkdirSync(capturesPath, { recursive: true });
@@ -325,6 +347,16 @@ async function loadSettings() {
       if (token) {
         settings.bearerToken = token;
         uploadService.setBearerToken(token);
+        captureService.setBearerToken(token);
+        if (audioRecordingService) {
+          audioRecordingService.setBearerToken(token);
+        }
+        if (sessionsService) {
+          sessionsService.setBearerToken(token);
+        }
+        if (apiService) {
+          apiService.setBearerToken(token);
+        }
         console.log('[Auth] Token loaded and validated on startup');
       }
 
@@ -340,6 +372,13 @@ async function loadSettings() {
       if (token) {
         settings.bearerToken = token;
         uploadService.setBearerToken(token);
+        captureService.setBearerToken(token);
+        if (audioRecordingService) {
+          audioRecordingService.setBearerToken(token);
+        }
+        if (sessionsService) {
+          sessionsService.setBearerToken(token);
+        }
         console.log('[Auth] Token loaded on first run');
       }
 
@@ -447,6 +486,34 @@ function addFailedUpload(filePath, fileName, error) {
 function removeFailedUpload(filePath) {
   failedUploads = failedUploads.filter(f => f.path !== filePath);
   saveFailedUploads();
+}
+
+// Add an upload in progress
+function addUploadInProgress(filePath, fileName, type) {
+  const existing = uploadsInProgress.find(u => u.path === filePath);
+  if (!existing) {
+    uploadsInProgress.push({
+      path: filePath,
+      name: fileName,
+      type: type,
+      startedAt: Date.now(),
+      status: 'uploading'
+    });
+    console.log(`[Upload In Progress] Added: ${fileName}`);
+  }
+}
+
+// Remove an upload from in-progress list
+function removeUploadInProgress(filePath) {
+  uploadsInProgress = uploadsInProgress.filter(u => u.path !== filePath);
+  console.log(`[Upload In Progress] Removed: ${filePath}`);
+}
+
+// Notify renderer about capture changes
+function notifyCaptureChange() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('captures-changed');
+  }
 }
 
 // Sync upload records from server
@@ -645,6 +712,42 @@ function createOverlayWindow() {
       });
     `);
   });
+}
+
+function createSessionOverlayWindow() {
+  if (sessionOverlayWindow) {
+    sessionOverlayWindow.show();
+    sessionOverlayWindow.focus();
+    return;
+  }
+
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  sessionOverlayWindow = new BrowserWindow({
+    width: width,
+    height: height,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'session-overlay-preload.js')
+    }
+  });
+
+  sessionOverlayWindow.loadFile('session-overlay.html');
+
+  sessionOverlayWindow.on('closed', () => {
+    sessionOverlayWindow = null;
+  });
+
+  // Set window to be click-through except for interactive elements
+  sessionOverlayWindow.setIgnoreMouseEvents(false);
 }
 
 function createTray() {
@@ -954,6 +1057,10 @@ async function syncFile(filePath, eventType) {
       // Sync token to settings and uploadService
       settings.bearerToken = currentToken;
       uploadService.setBearerToken(currentToken);
+      captureService.setBearerToken(currentToken);
+      if (audioRecordingService) {
+        audioRecordingService.setBearerToken(currentToken);
+      };
 
       // Upload file using real API
       console.log(`[Sync] Uploading ${relativePath} via API`);
@@ -1341,6 +1448,13 @@ ipcMain.handle('update-settings', (event, newSettings) => {
   // Update upload service with new settings
   if (newSettings.bearerToken !== undefined) {
     uploadService.setBearerToken(newSettings.bearerToken);
+    captureService.setBearerToken(newSettings.bearerToken);
+    if (audioRecordingService) {
+      audioRecordingService.setBearerToken(newSettings.bearerToken);
+    }
+    if (sessionsService) {
+      sessionsService.setBearerToken(newSettings.bearerToken);
+    }
   }
   if (newSettings.apiBaseUrl !== undefined) {
     process.env.API_BASE_URL = newSettings.apiBaseUrl;
@@ -1571,6 +1685,9 @@ ipcMain.handle('auth-login', async () => {
     if (audioRecordingService) {
       audioRecordingService.setBearerToken(token);
     }
+    if (sessionsService) {
+      sessionsService.setBearerToken(token);
+    }
 
     console.log('[Auth] Login successful');
     return { success: true, token };
@@ -1588,6 +1705,9 @@ ipcMain.handle('auth-logout', async () => {
     captureService.setBearerToken(null);
     if (audioRecordingService) {
       audioRecordingService.setBearerToken(null);
+    }
+    if (sessionsService) {
+      sessionsService.setBearerToken(null);
     }
 
     console.log('[Auth] Logout successful');
@@ -1624,11 +1744,113 @@ ipcMain.handle('auth-validate-token', async () => {
     if (!result.isValid) {
       settings.bearerToken = null;
       uploadService.setBearerToken(null);
+      captureService.setBearerToken(null);
+      if (audioRecordingService) {
+        audioRecordingService.setBearerToken(null);
+      }
+      if (sessionsService) {
+        sessionsService.setBearerToken(null);
+      }
+      if (apiService) {
+        apiService.setBearerToken(null);
+      }
     }
     return { success: true, isValid: result.isValid, user: result.user };
   } catch (error) {
     console.error('[Auth] Token validation failed:', error);
     return { success: false, isValid: false, user: null };
+  }
+});
+
+// Network and Sync IPC Handlers
+ipcMain.handle('get-network-status', () => {
+  return { success: true, online: isOnline };
+});
+
+ipcMain.handle('get-sync-queue-stats', async () => {
+  try {
+    if (!syncQueueService) {
+      return { success: false, error: 'Sync queue not initialized' };
+    }
+    const stats = await syncQueueService.getStats();
+    const apiQueueLength = apiService ? apiService.getSyncQueue().length : 0;
+    return { 
+      success: true, 
+      stats,
+      apiQueueLength,
+      isProcessing: syncQueueService.isProcessing()
+    };
+  } catch (error) {
+    console.error('[Sync Queue] Failed to get stats:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('process-sync-queue', async () => {
+  try {
+    if (!isOnline) {
+      return { success: false, error: 'Cannot sync while offline' };
+    }
+    const result = await processSyncQueue();
+    return { success: true, result };
+  } catch (error) {
+    console.error('[Sync Queue] Failed to process:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('clear-sync-queue', async () => {
+  try {
+    if (!syncQueueService) {
+      return { success: false, error: 'Sync queue not initialized' };
+    }
+    const count = await syncQueueService.clear();
+    if (apiService) {
+      apiService.clearSyncQueue();
+    }
+    return { success: true, clearedCount: count };
+  } catch (error) {
+    console.error('[Sync Queue] Failed to clear:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-cache-stats', async () => {
+  try {
+    if (!apiService) {
+      return { success: false, error: 'API service not initialized' };
+    }
+    const stats = await apiService.getCacheStats();
+    return { success: true, stats };
+  } catch (error) {
+    console.error('[Cache] Failed to get stats:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('clear-cache', async () => {
+  try {
+    if (!apiService) {
+      return { success: false, error: 'API service not initialized' };
+    }
+    await apiService.clearCache();
+    return { success: true };
+  } catch (error) {
+    console.error('[Cache] Failed to clear:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('clean-expired-cache', async () => {
+  try {
+    if (!apiService) {
+      return { success: false, error: 'API service not initialized' };
+    }
+    const count = await apiService.cleanExpiredCache();
+    return { success: true, cleanedCount: count };
+  } catch (error) {
+    console.error('[Cache] Failed to clean expired:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -1646,6 +1868,21 @@ ipcMain.handle('open-external', async (event, url) => {
   return { success: true };
 });
 
+// Open file in default application
+ipcMain.handle('open-file', async (event, filePath) => {
+  try {
+    const result = await shell.openPath(filePath);
+    if (result) {
+      console.error('Failed to open file:', result);
+      return { success: false, error: result };
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error opening file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Session Management IPC Handlers
 ipcMain.handle('session-get-info', async () => {
   try {
@@ -1653,6 +1890,18 @@ ipcMain.handle('session-get-info', async () => {
     return { success: true, ...info };
   } catch (error) {
     console.error('Failed to get session info:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Set current session ID from React app
+ipcMain.handle('session-set-current', async (event, { sessionId } = {}) => {
+  try {
+    console.log(`[Session] React app set current session: ${sessionId}`);
+    reactAppCurrentSessionId = sessionId || null;
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to set current session:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1683,6 +1932,185 @@ ipcMain.handle('session-reset', async (event, { subject, topic, endDateTime, tit
     return result;
   } catch (error) {
     console.error('Failed to reset session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Session dialog handlers
+ipcMain.handle('session-dialog-get-sessions', async (event) => {
+  try {
+    const token = await authService.getToken();
+    if (!token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const API_BASE = settings.apiBaseUrl || config.API.BASE_URL;
+    const response = await fetch(`${API_BASE}/api/sessions?status=active&limit=100`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to fetch sessions: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('[Session Dialog] Fetched sessions:', result);
+    console.log('[Session Dialog] Sessions array:', result.sessions || result.data);
+    
+    // Handle different response structures
+    const sessions = result.sessions || result.data || result || [];
+    console.log('[Session Dialog] Returning sessions count:', Array.isArray(sessions) ? sessions.length : 0);
+    
+    return {
+      success: true,
+      sessions: Array.isArray(sessions) ? sessions : []
+    };
+  } catch (error) {
+    console.error('[Session Dialog] Error fetching sessions:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('session-dialog-create', async (event, { subject, topic, endTime } = {}) => {
+  try {
+    if (!subject || !endTime) {
+      return { success: false, error: 'Subject and end time are required' };
+    }
+
+    const token = await authService.getToken();
+    if (!token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const API_BASE = settings.apiBaseUrl || config.API.BASE_URL;
+    const response = await fetch(`${API_BASE}/api/sessions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'create',
+        subject,
+        topic: topic || '',
+        endDateTime: endTime
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to create session: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('[Session Dialog] Session created:', result);
+
+    // Close the session overlay window
+    if (sessionOverlayWindow) {
+      sessionOverlayWindow.close();
+      sessionOverlayWindow = null;
+    }
+
+    // Notify main window with the new session
+    if (mainWindow) {
+      mainWindow.webContents.send('session-selected', {
+        sessionId: result.sessionId,
+        subject: result.subject || subject,
+        topic: result.topic || topic,
+        startTime: result.startTime,
+        status: result.status || 'active'
+      });
+    }
+
+    return {
+      success: true,
+      newSessionId: result.sessionId,
+      subject: result.subject || subject,
+      topic: result.topic || topic,
+      newStartTime: result.startTime,
+      status: result.status
+    };
+  } catch (error) {
+    console.error('[Session Dialog] Error creating session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('session-dialog-select', async (event, { sessionId } = {}) => {
+  try {
+    if (!sessionId) {
+      return { success: false, error: 'Session ID is required' };
+    }
+
+    const token = await authService.getToken();
+    if (!token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const API_BASE = settings.apiBaseUrl || config.API.BASE_URL;
+    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to fetch session: ${response.status}`);
+    }
+
+    const session = await response.json();
+    console.log('[Session Dialog] Session selected:', session);
+
+    // UPDATE THE SESSION DATA - THIS IS CRITICAL!
+    sessionData.sessionId = session.sessionId;
+    sessionData.sessionStartTime = session.startTime ? new Date(session.startTime).getTime() : Date.now();
+    sessionData.endDateTime = session.endDateTime || null;
+    sessionData.subject = session.subject || null;
+    sessionData.topic = session.topic || null;
+    sessionData.title = session.title || null;
+    sessionData.status = session.status || 'active';
+    
+    // Save settings to persist the selected session
+    saveSettings();
+    
+    console.log(`[Session Dialog] Session data updated - ID: ${sessionData.sessionId}`);
+
+    // Close the session overlay window
+    if (sessionOverlayWindow) {
+      sessionOverlayWindow.close();
+      sessionOverlayWindow = null;
+    }
+
+    // Notify main window
+    if (mainWindow) {
+      mainWindow.webContents.send('session-selected', session);
+    }
+
+    return { success: true, session };
+  } catch (error) {
+    console.error('[Session Dialog] Error selecting session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Close session overlay window
+ipcMain.handle('session-overlay-close', async () => {
+  try {
+    if (sessionOverlayWindow) {
+      sessionOverlayWindow.close();
+      sessionOverlayWindow = null;
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('[Session Overlay] Error closing window:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1775,9 +2203,21 @@ ipcMain.handle('take-screenshot', async () => {
       overlayWindow.show();
     }
 
+    // Track this as an upload in progress
+    addUploadInProgress(filepath, filename, 'screenshot');
+    
+    // Notify UI about the new capture
+    notifyCaptureChange();
+
     // Immediately try to upload to backend
     try {
       const uploadResult = await captureService.uploadCapture(filepath);
+
+      // Remove from in-progress
+      removeUploadInProgress(filepath);
+      
+      // Notify UI about upload completion
+      notifyCaptureChange();
 
       if (uploadResult.success) {
         console.log(`[Screenshot] Successfully uploaded: ${uploadResult.captureId}`);
@@ -1811,6 +2251,13 @@ ipcMain.handle('take-screenshot', async () => {
       }
     } catch (uploadError) {
       console.error('[Screenshot] Upload error:', uploadError);
+      
+      // Remove from in-progress
+      removeUploadInProgress(filepath);
+      
+      // Notify UI about upload failure
+      notifyCaptureChange();
+      
       addFailedUpload(filepath, filename, uploadError.message);
 
       return {
@@ -2018,6 +2465,156 @@ async function handleDeepLink(url) {
   }
 }
 
+// Network status monitoring
+function initializeNetworkMonitoring() {
+  console.log('[Network] Initializing network status monitoring');
+  
+  // Initial network check
+  checkNetworkStatus();
+  
+  // Monitor network status periodically
+  setInterval(checkNetworkStatus, 30000); // Check every 30 seconds
+  
+  // Listen to online/offline events
+  process.on('online', () => {
+    console.log('[Network] System reports: ONLINE');
+    handleNetworkChange(true);
+  });
+  
+  process.on('offline', () => {
+    console.log('[Network] System reports: OFFLINE');
+    handleNetworkChange(false);
+  });
+}
+
+async function checkNetworkStatus() {
+  try {
+    // Try to reach the API server
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
+    const response = await fetch(`${settings.apiBaseUrl}/api/health`, {
+      method: 'HEAD',
+      signal: controller.signal
+    }).catch(() => null);
+    
+    clearTimeout(timeout);
+    
+    const wasOnline = isOnline;
+    isOnline = response && response.ok;
+    
+    if (wasOnline !== isOnline) {
+      handleNetworkChange(isOnline);
+    }
+  } catch (error) {
+    if (isOnline) {
+      handleNetworkChange(false);
+    }
+  }
+}
+
+async function handleNetworkChange(online) {
+  const previousStatus = isOnline;
+  isOnline = online;
+  
+  console.log(`[Network] Status changed: ${previousStatus ? 'ONLINE' : 'OFFLINE'} -> ${online ? 'ONLINE' : 'OFFLINE'}`);
+  
+  // Update API service
+  if (apiService) {
+    apiService.setOnlineStatus(online);
+  }
+  
+  // Notify all windows
+  if (mainWindow) {
+    mainWindow.webContents.send('network-status-changed', { online });
+  }
+  if (overlayWindow) {
+    overlayWindow.webContents.send('network-status-changed', { online });
+  }
+  
+  // If coming back online, process sync queue
+  if (online && !previousStatus) {
+    console.log('[Network] Back online - processing sync queue');
+    await processSyncQueue();
+  }
+}
+
+async function processSyncQueue() {
+  if (!syncQueueService || !apiService) {
+    console.log('[Sync] Services not initialized');
+    return;
+  }
+  
+  try {
+    console.log('[Sync] Starting sync queue processing');
+    
+    // Process API service queue first
+    if (apiService.getSyncQueue().length > 0) {
+      const apiResult = await apiService.processSyncQueue();
+      console.log('[Sync] API queue processed:', apiResult);
+    }
+    
+    // Process sync queue service
+    const stats = await syncQueueService.getStats();
+    console.log('[Sync] Queue stats:', stats);
+    
+    if (stats.total > 0) {
+      const result = await syncQueueService.process(async (item) => {
+        console.log(`[Sync] Processing queue item: ${item.type} ${item.endpoint}`);
+        
+        try {
+          let apiResult;
+          
+          switch (item.type) {
+            case 'POST':
+              apiResult = await apiService.post(item.endpoint, {
+                body: item.data,
+                queueIfOffline: false
+              });
+              break;
+            case 'PUT':
+              apiResult = await apiService.put(item.endpoint, {
+                body: item.data,
+                queueIfOffline: false
+              });
+              break;
+            case 'DELETE':
+              apiResult = await apiService.delete(item.endpoint, {
+                queueIfOffline: false
+              });
+              break;
+            case 'UPLOAD':
+              // Handle file upload
+              if (item.data.filePath && fs.existsSync(item.data.filePath)) {
+                const uploadResult = await uploadService.uploadFile(item.data.filePath);
+                apiResult = uploadResult;
+              } else {
+                apiResult = { success: false, error: 'File not found' };
+              }
+              break;
+            default:
+              apiResult = { success: false, error: 'Unknown operation type' };
+          }
+          
+          return apiResult;
+        } catch (error) {
+          console.error('[Sync] Error processing item:', error);
+          return { success: false, error: error.message };
+        }
+      });
+      
+      console.log('[Sync] Queue processing complete:', result);
+      
+      // Notify main window about sync completion
+      if (mainWindow) {
+        mainWindow.webContents.send('sync-completed', result);
+      }
+    }
+  } catch (error) {
+    console.error('[Sync] Error processing sync queue:', error);
+  }
+}
+
 app.whenReady().then(async () => {
   // Register custom protocol for OAuth callback
   if (process.defaultApp) {
@@ -2052,6 +2649,32 @@ app.whenReady().then(async () => {
   console.log('[INIT] Initializing AudioRecordingService with path:', capturesPath);
   audioRecordingService = new AudioRecordingService(capturesPath, settings.apiBaseUrl);
   console.log('[INIT] AudioRecordingService initialized:', !!audioRecordingService);
+
+  // Initialize sessions service
+  console.log('[INIT] Initializing SessionsService');
+  sessionsService = new SessionsService();
+  if (settings.apiBaseUrl) {
+    sessionsService.setApiBaseUrl(settings.apiBaseUrl);
+  }
+  console.log('[INIT] SessionsService initialized:', !!sessionsService);
+
+  // Initialize API service for offline support
+  console.log('[INIT] Initializing ApiService and SyncQueueService');
+  apiService = new ApiService();
+  syncQueueService = new SyncQueueService();
+  await syncQueueService.initialize();
+  if (settings.apiBaseUrl) {
+    apiService.setApiBaseUrl(settings.apiBaseUrl);
+  }
+  console.log('[INIT] ApiService and SyncQueueService initialized');
+  
+  // Set bearer token if we have one from settings
+  if (settings.bearerToken) {
+    audioRecordingService.setBearerToken(settings.bearerToken);
+    sessionsService.setBearerToken(settings.bearerToken);
+    apiService.setBearerToken(settings.bearerToken);
+    console.log('[INIT] Bearer token set to services');
+  }
   
   // Connect session getter to audio recording service
   audioRecordingService.setSessionIdGetter(getSessionId);
@@ -2115,6 +2738,9 @@ app.whenReady().then(async () => {
     createOverlayWindow();
     console.log('[App Start] Screenshot overlay opened automatically');
   }, 1000);
+
+  // Initialize network status monitoring
+  initializeNetworkMonitoring();
 });
 
 app.on('window-all-closed', () => {
@@ -2225,46 +2851,58 @@ ipcMain.handle('recording-save-final', async (event, { audioData, timestamp }) =
 // Captures IPC Handlers
 ipcMain.handle('captures-get-all', async () => {
   try {
-    // Fetch captures (screenshots) from backend
-    const backendResult = await captureService.getAllCaptures({
-      limit: 100,
-      sortBy: 'createdAt',
-      order: 'desc'
-    });
-
+    // Fetch captures (screenshots) from backend - handle auth errors gracefully
     let backendCaptures = [];
-    if (backendResult.success && backendResult.captures) {
-      backendCaptures = backendResult.captures.map(capture => ({
-        captureId: capture._id || capture.captureId,
-        name: capture.fileName,
-        path: null, // No local path for backend captures
-        type: capture.fileType?.startsWith('audio') ? 'audio' : 'screenshot',
-        size: capture.fileSize,
-        timestamp: new Date(capture.createdAt),
-        url: capture.url,
-        source: 'backend',
-        tags: capture.tags || []
-      }));
+    try {
+      const backendResult = await captureService.getAllCaptures({
+        limit: 100,
+        sortBy: 'createdAt',
+        order: 'desc'
+      });
+
+      if (backendResult.success && backendResult.captures) {
+        backendCaptures = backendResult.captures.map(capture => ({
+          captureId: capture._id || capture.captureId,
+          name: capture.fileName,
+          path: null, // No local path for backend captures
+          type: capture.fileType?.startsWith('audio') ? 'audio' : 'screenshot',
+          size: capture.fileSize,
+          timestamp: new Date(capture.createdAt),
+          url: capture.url,
+          source: 'backend',
+          tags: capture.tags || []
+        }));
+      }
+    } catch (captureError) {
+      console.warn('[Captures] Failed to fetch screenshots from backend:', captureError.message);
     }
 
-    // Fetch recordings from backend
-    const recordingsResult = await audioRecordingService.fetchRecordingsFromBackend();
-
+    // Fetch recordings from backend - handle auth errors gracefully
     let backendRecordings = [];
-    if (recordingsResult.success && recordingsResult.recordings) {
-      backendRecordings = recordingsResult.recordings.map(recording => ({
-        captureId: recording.recordingId,
-        name: recording.title || `Recording ${new Date(recording.createdAt).toLocaleString()}`,
-        path: null, // No local path for backend recordings
-        type: 'audio',
-        size: recording.finalFileSize || 0,
-        timestamp: new Date(recording.createdAt || recording.sessionStarted),
-        url: recording.downloadUrl,
-        source: 'backend',
-        duration: recording.totalDuration,
-        totalChunks: recording.totalChunks,
-        status: recording.status
-      }));
+    try {
+      const recordingsResult = await audioRecordingService.fetchRecordingsFromBackend({
+        limit: 100,
+        sortBy: 'createdAt',
+        order: 'desc'
+      });
+
+      if (recordingsResult.success && recordingsResult.recordings) {
+        backendRecordings = recordingsResult.recordings.map(recording => ({
+          captureId: recording.recordingId,
+          name: recording.title || `Recording ${new Date(recording.createdAt).toLocaleString()}`,
+          path: null, // No local path for backend recordings
+          type: 'audio',
+          size: recording.finalFileSize || 0,
+          timestamp: new Date(recording.createdAt || recording.sessionStarted),
+          url: recording.downloadUrl,
+          source: 'backend',
+          duration: recording.totalDuration,
+          totalChunks: recording.totalChunks,
+          status: recording.status
+        }));
+      }
+    } catch (recordingError) {
+      console.warn('[Captures] Failed to fetch recordings from backend:', recordingError.message);
     }
 
     // Get local failed uploads
@@ -2285,7 +2923,8 @@ ipcMain.handle('captures-get-all', async () => {
             source: 'local',
             uploadError: failed.error,
             retryCount: failed.retryCount,
-            lastAttempt: new Date(failed.lastAttempt)
+            lastAttempt: new Date(failed.lastAttempt),
+            uploadStatus: 'failed'
           });
         } else {
           // File no longer exists, remove from failed uploads
@@ -2296,11 +2935,38 @@ ipcMain.handle('captures-get-all', async () => {
       }
     }
 
-    // Combine backend captures, backend recordings, and local captures, sorted by timestamp
-    const allCaptures = [...backendCaptures, ...backendRecordings, ...localCaptures];
+    // Get uploads in progress
+    const uploadingCaptures = [];
+    for (const upload of uploadsInProgress) {
+      try {
+        if (fs.existsSync(upload.path)) {
+          const stats = await fs_path.stat(upload.path);
+          const ext = path.extname(upload.name).toLowerCase();
+          const type = ['.webm', '.mp3', '.wav', '.m4a'].includes(ext) ? 'audio' : 'screenshot';
+
+          uploadingCaptures.push({
+            name: upload.name,
+            path: upload.path,
+            type: type,
+            size: stats.size,
+            timestamp: new Date(upload.startedAt || stats.mtime),
+            source: 'local',
+            uploadStatus: 'uploading'
+          });
+        } else {
+          // File no longer exists, remove from in-progress
+          removeUploadInProgress(upload.path);
+        }
+      } catch (error) {
+        console.error(`Error processing upload in progress ${upload.path}:`, error);
+      }
+    }
+
+    // Combine backend captures, backend recordings, uploading captures, and local captures, sorted by timestamp
+    const allCaptures = [...backendCaptures, ...backendRecordings, ...uploadingCaptures, ...localCaptures];
     allCaptures.sort((a, b) => b.timestamp - a.timestamp);
 
-    console.log(`[Captures] Returning ${backendCaptures.length} backend captures + ${backendRecordings.length} backend recordings + ${localCaptures.length} local captures`);
+    console.log(`[Captures] Returning ${backendCaptures.length} backend captures + ${backendRecordings.length} backend recordings + ${uploadingCaptures.length} uploading + ${localCaptures.length} local captures`);
 
     return allCaptures;
   } catch (error) {
@@ -2322,14 +2988,40 @@ ipcMain.handle('captures-get-all', async () => {
             timestamp: new Date(failed.createdAt || stats.mtime),
             source: 'local',
             uploadError: failed.error,
-            retryCount: failed.retryCount
+            retryCount: failed.retryCount,
+            uploadStatus: 'failed'
           });
         }
       } catch (err) {
         console.error(`Error processing failed upload:`, err);
       }
     }
-    return localCaptures;
+
+    // Get uploads in progress
+    const uploadingCaptures = [];
+    for (const upload of uploadsInProgress) {
+      try {
+        if (fs.existsSync(upload.path)) {
+          const stats = await fs_path.stat(upload.path);
+          const ext = path.extname(upload.name).toLowerCase();
+          const type = ['.webm', '.mp3', '.wav', '.m4a'].includes(ext) ? 'audio' : 'screenshot';
+
+          uploadingCaptures.push({
+            name: upload.name,
+            path: upload.path,
+            type: type,
+            size: stats.size,
+            timestamp: new Date(upload.startedAt || stats.mtime),
+            source: 'local',
+            uploadStatus: 'uploading'
+          });
+        }
+      } catch (err) {
+        console.error(`Error processing upload in progress:`, err);
+      }
+    }
+
+    return [...uploadingCaptures, ...localCaptures];
   }
 });
 
@@ -2340,8 +3032,14 @@ ipcMain.handle('captures-delete', async (event, captureItems) => {
     for (const item of captureItems) {
       try {
         if (item.source === 'backend' && item.captureId) {
-          // Delete from backend
-          const deleteResult = await captureService.deleteCapture(item.captureId);
+          // Delete from backend - check if it's a recording or capture
+          let deleteResult;
+          if (item.type === 'audio') {
+            deleteResult = await audioRecordingService.deleteRecordingFromBackend(item.captureId);
+          } else {
+            deleteResult = await captureService.deleteCapture(item.captureId);
+          }
+          
           if (deleteResult.success) {
             results.backend++;
           } else {
@@ -2384,8 +3082,23 @@ ipcMain.handle('captures-retry-upload', async (event, filePath) => {
     }
 
     console.log(`[Captures] Retrying upload: ${filePath}`);
+    const fileName = path.basename(filePath);
+    const ext = path.extname(fileName).toLowerCase();
+    const type = ['.webm', '.mp3', '.wav', '.m4a'].includes(ext) ? 'audio' : 'screenshot';
+
+    // Track as uploading
+    addUploadInProgress(filePath, fileName, type);
+    
+    // Notify UI
+    notifyCaptureChange();
 
     const uploadResult = await captureService.uploadCapture(filePath);
+
+    // Remove from in-progress
+    removeUploadInProgress(filePath);
+    
+    // Notify UI
+    notifyCaptureChange();
 
     if (uploadResult.success) {
       console.log(`[Captures] Retry successful: ${uploadResult.captureId}`);
@@ -2415,6 +3128,13 @@ ipcMain.handle('captures-retry-upload', async (event, filePath) => {
     }
   } catch (error) {
     console.error('[Captures] Retry error:', error);
+    
+    // Remove from in-progress
+    removeUploadInProgress(filePath);
+    
+    // Notify UI
+    notifyCaptureChange();
+    
     const fileName = path.basename(filePath);
     addFailedUpload(filePath, fileName, error.message);
 
@@ -2438,7 +3158,22 @@ ipcMain.handle('captures-retry-all', async () => {
           continue;
         }
 
+        const ext = path.extname(failed.name).toLowerCase();
+        const type = ['.webm', '.mp3', '.wav', '.m4a'].includes(ext) ? 'audio' : 'screenshot';
+
+        // Track as uploading
+        addUploadInProgress(failed.path, failed.name, type);
+        
+        // Notify UI
+        notifyCaptureChange();
+
         const uploadResult = await captureService.uploadCapture(failed.path);
+
+        // Remove from in-progress
+        removeUploadInProgress(failed.path);
+        
+        // Notify UI
+        notifyCaptureChange();
 
         if (uploadResult.success) {
           await fs_path.unlink(failed.path);
@@ -2451,6 +3186,13 @@ ipcMain.handle('captures-retry-all', async () => {
         }
       } catch (error) {
         console.error(`Error retrying ${failed.name}:`, error);
+        
+        // Remove from in-progress
+        removeUploadInProgress(failed.path);
+        
+        // Notify UI
+        notifyCaptureChange();
+        
         addFailedUpload(failed.path, failed.name, error.message);
         results.failed++;
         results.errors.push(`${failed.name}: ${error.message}`);
@@ -2589,4 +3331,82 @@ ipcMain.handle('captures-save-as-notes', async (event, capturePaths) => {
 
 ipcMain.handle('captures-get-path', () => {
   return capturesPath;
+});
+
+// Sessions IPC Handlers
+ipcMain.handle('sessions-get-all', async (event, params = {}) => {
+  try {
+    if (!sessionsService) {
+      console.warn('[Sessions] SessionsService not initialized');
+      return {
+        success: false,
+        error: 'Sessions service not initialized',
+        sessions: [],
+        total: 0,
+        limit: 0,
+        offset: 0
+      };
+    }
+
+    if (!settings.bearerToken) {
+      console.warn('[Sessions] No bearer token available - user not authenticated');
+      return {
+        success: false,
+        error: 'Not authenticated. Please sign in first.',
+        sessions: [],
+        total: 0,
+        limit: 0,
+        offset: 0
+      };
+    }
+
+    const result = await sessionsService.fetchSessions({
+      sessionId: params.sessionId,
+      status: params.status,
+      subject: params.subject,
+      topic: params.topic,
+      limit: params.limit || 50,
+      offset: params.offset !== undefined ? params.offset : 0
+    });
+
+    console.log('[Sessions] Fetched sessions:', result.success, 'Count:', result.sessions?.length || 0);
+
+    return result;
+  } catch (error) {
+    console.error('[Sessions] Error fetching sessions:', error);
+    return {
+      success: false,
+      error: error.message,
+      sessions: [],
+      total: 0,
+      limit: 0,
+      offset: 0
+    };
+  }
+});
+
+// Open session overlay window
+ipcMain.handle('open-session-overlay', async (event) => {
+  try {
+    console.log('[IPC] Opening session overlay window');
+    createSessionOverlayWindow();
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error opening session overlay:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Close session overlay window
+ipcMain.handle('close-session-overlay', async (event) => {
+  try {
+    if (sessionOverlayWindow) {
+      sessionOverlayWindow.close();
+      sessionOverlayWindow = null;
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error closing session overlay:', error);
+    return { success: false, error: error.message };
+  }
 });

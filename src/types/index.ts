@@ -48,6 +48,8 @@ export interface Capture {
   uploadError?: string;
   retryCount?: number;
   lastAttempt?: Date;
+  // Upload status
+  uploadStatus?: 'uploading' | 'failed' | 'uploaded';
   // Recording fields
   duration?: number; // Duration in seconds
   totalChunks?: number;
@@ -65,6 +67,19 @@ export interface UploadProgress {
   error?: string;
   success?: boolean;
   noteId?: string;
+}
+
+export interface Session {
+  sessionId: string;
+  userId: string;
+  subject: string;
+  topic: string;
+  title?: string;
+  startTime: string;
+  endTime?: string;
+  status: 'active' | 'ended';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AuthStatus {
@@ -91,6 +106,7 @@ declare global {
       setBearerToken: (token: string) => Promise<void>;
       setApiBaseUrl: (url: string) => Promise<void>;
       openExternal: (url: string) => Promise<void>;
+      openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
       fetchNotePreviews: (noteIds: string[]) => Promise<{ success: boolean; previews: Record<string, string | null>; error?: string }>;
       onSyncStatus: (callback: (data: any) => void) => void;
       onWatchStarted: (callback: (data: any) => void) => void;
@@ -134,9 +150,19 @@ declare global {
         getPath: () => Promise<string>;
         retryUpload: (filePath: string) => Promise<{ success: boolean; captureId?: string; url?: string; error?: string }>;
         retryAll: () => Promise<{ success: boolean; uploaded?: number; failed?: number; errors?: string[] }>;
+        onCapturesChanged: (callback: () => void) => void;
+      };
+      sessions: {
+        getAll: (params?: { sessionId?: string; status?: 'active' | 'ended'; subject?: string; topic?: string; limit?: number; offset?: number }) => Promise<{ success: boolean; sessions: Session[]; total: number; limit: number; offset: number; error?: string }>;
+      };
+      sessionOverlay: {
+        show: () => Promise<void>;
+        close: () => Promise<void>;
       };
     };
   }
 }
+
+export {};
 
 export {};

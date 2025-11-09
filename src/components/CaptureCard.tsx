@@ -1,7 +1,8 @@
-import { Image as ImageIcon, Mic, Check, RefreshCw, AlertTriangle, Cloud, HardDrive } from 'lucide-react';
+import { Image as ImageIcon, Mic, RefreshCw, AlertTriangle, Cloud, HardDrive, Loader2 } from 'lucide-react';
 import { cn, formatBytes, formatDate, formatDuration } from '@/lib/utils';
 import type { Capture } from '@/types';
-import { useAppStore } from '@/store';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 interface CaptureCardProps {
   capture: Capture;
@@ -9,32 +10,47 @@ interface CaptureCardProps {
 }
 
 export function CaptureCard({ capture, onRetry }: CaptureCardProps) {
-  const { selectedCaptures, toggleCaptureSelection } = useAppStore();
-  const captureId = capture.captureId || capture.path;
-  const isSelected = captureId ? selectedCaptures.has(captureId) : false;
+  const [imageLoading, setImageLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
 
-  const handleToggle = () => {
-    if (captureId) {
-      toggleCaptureSelection(captureId);
+  const handleOpenFile = async () => {
+    // Only open local files (recordings/audio with path)
+    if (capture.path && (capture.type === 'recording' || capture.type === 'audio')) {
+      try {
+        const result = await window.electronAPI.openFile(capture.path);
+        if (!result.success) {
+          toast.error(`Failed to open file: ${result.error}`);
+        }
+      } catch (error) {
+        toast.error(`Error opening file: ${(error as Error).message}`);
+      }
     }
   };
 
   const isLocal = capture.source === 'local';
+  const isUploading = capture.uploadStatus === 'uploading';
   const hasError = isLocal && capture.uploadError;
+  const canOpenFile = capture.path && (capture.type === 'recording' || capture.type === 'audio');
 
   return (
     <div
+      onClick={canOpenFile ? handleOpenFile : undefined}
       className={cn(
         'glass rounded-lg border transition-all group animate-scale-in relative',
-        isSelected
-          ? 'border-primary shadow-neon'
-          : 'border-border/50 hover:border-primary/50',
-        hasError && 'border-amber-500/50'
+        'border-border/50 hover:border-primary/50',
+        canOpenFile && 'cursor-pointer',
+        hasError && 'border-amber-500/50',
+        isUploading && 'border-blue-500/50'
       )}
     >
       {/* Source Badge */}
       <div className="absolute top-2 left-2 z-10">
-        {isLocal ? (
+        {isUploading ? (
+          <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-blue-500/90 text-white text-xs font-medium">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Uploading
+          </div>
+        ) : isLocal ? (
           <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/90 text-white text-xs font-medium">
             <HardDrive className="w-3 h-3" />
             Local
@@ -47,40 +63,68 @@ export function CaptureCard({ capture, onRetry }: CaptureCardProps) {
         )}
       </div>
 
-      {/* Checkbox */}
-      <div className="absolute top-2 right-2 z-10">
-        <div
-          onClick={handleToggle}
-          className={cn(
-            'w-5 h-5 rounded border-2 flex items-center justify-center transition-all cursor-pointer',
-            isSelected
-              ? 'bg-primary border-primary'
-              : 'border-border bg-background/50 group-hover:border-primary/50'
-          )}
-        >
-          {isSelected && <Check className="w-3 h-3 text-primary-foreground" />}
-        </div>
-      </div>
-
       {/* Preview */}
-      <div 
-        onClick={handleToggle}
-        className="aspect-video bg-muted/20 rounded-t-lg relative overflow-hidden cursor-pointer"
-      >
+      <div className="aspect-video bg-muted/20 rounded-t-lg relative overflow-hidden">
         {capture.type === 'screenshot' ? (
           capture.url ? (
-            <img
-              src={capture.url}
-              alt={capture.name}
-              className="w-full h-full object-cover"
-              loading="lazy"
-            />
+            <>
+              {/* Loading Skeleton */}
+              {imageLoading && !imageError && (
+                <div className="absolute inset-0 bg-muted/20 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                </div>
+              )}
+              {/* Actual Image */}
+              <img
+                src={capture.url}
+                alt={capture.name}
+                className={cn(
+                  "w-full h-full object-cover transition-opacity duration-200",
+                  imageLoading ? "opacity-0" : "opacity-100"
+                )}
+                loading="lazy"
+                onLoad={() => setImageLoading(false)}
+                onError={() => {
+                  setImageLoading(false);
+                  setImageError(true);
+                }}
+              />
+              {/* Error State */}
+              {imageError && (
+                <div className="absolute inset-0 bg-muted/20 flex items-center justify-center">
+                  <ImageIcon className="w-12 h-12 text-muted-foreground opacity-30" />
+                </div>
+              )}
+            </>
           ) : capture.thumbnail ? (
-            <img
-              src={capture.thumbnail}
-              alt={capture.name}
-              className="w-full h-full object-cover"
-            />
+            <>
+              {/* Loading Skeleton */}
+              {imageLoading && !imageError && (
+                <div className="absolute inset-0 bg-muted/20 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                </div>
+              )}
+              {/* Actual Image */}
+              <img
+                src={capture.thumbnail}
+                alt={capture.name}
+                className={cn(
+                  "w-full h-full object-cover transition-opacity duration-200",
+                  imageLoading ? "opacity-0" : "opacity-100"
+                )}
+                onLoad={() => setImageLoading(false)}
+                onError={() => {
+                  setImageLoading(false);
+                  setImageError(true);
+                }}
+              />
+              {/* Error State */}
+              {imageError && (
+                <div className="absolute inset-0 bg-muted/20 flex items-center justify-center">
+                  <ImageIcon className="w-12 h-12 text-muted-foreground opacity-30" />
+                </div>
+              )}
+            </>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <ImageIcon className="w-12 h-12 text-muted-foreground opacity-30" />
@@ -92,8 +136,15 @@ export function CaptureCard({ capture, onRetry }: CaptureCardProps) {
           </div>
         )}
         
+        {/* Uploading Overlay */}
+        {isUploading && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          </div>
+        )}
+        
         {/* Error Overlay */}
-        {hasError && (
+        {hasError && !isUploading && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
             <AlertTriangle className="w-8 h-8 text-amber-500" />
           </div>
@@ -118,8 +169,18 @@ export function CaptureCard({ capture, onRetry }: CaptureCardProps) {
           </div>
         )}
         
+        {/* Uploading Status */}
+        {isUploading && (
+          <div className="text-xs text-blue-500 bg-blue-500/10 rounded p-2">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Uploading to server...</span>
+            </div>
+          </div>
+        )}
+        
         {/* Error Message */}
-        {hasError && (
+        {hasError && !isUploading && (
           <div className="text-xs text-amber-500 bg-amber-500/10 rounded p-2">
             <div className="flex items-start gap-1">
               <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
@@ -135,7 +196,7 @@ export function CaptureCard({ capture, onRetry }: CaptureCardProps) {
         )}
         
         {/* Retry Button */}
-        {isLocal && onRetry && (
+        {isLocal && onRetry && !isUploading && (
           <button
             onClick={(e) => {
               e.stopPropagation();

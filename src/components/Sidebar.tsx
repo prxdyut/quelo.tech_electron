@@ -1,14 +1,16 @@
-import { Files, Image, Settings, Star, TrendingUp } from 'lucide-react';
+import { Files, Image, BookOpen, Settings } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { id: 'files' as const, icon: Files, label: 'All Notes' },
   { id: 'captures' as const, icon: Image, label: 'Captures' },
+  { id: 'sessions' as const, icon: BookOpen, label: 'Sessions' },
+  { id: 'settings' as const, icon: Settings, label: 'Settings' },
 ];
 
 export function Sidebar() {
-  const { currentView, setCurrentView, authStatus } = useAppStore();
+  const { currentView, setCurrentView } = useAppStore();
 
   return (
     <aside className="w-60 bg-[#0a0a0a] border-r border-[#1f1f1f] flex flex-col shrink-0">

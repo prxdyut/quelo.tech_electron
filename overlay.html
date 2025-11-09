@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Screenshot Overlay</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0/client"
+      }
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -146,6 +154,8 @@
       pointer-events: none;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       z-index: 1000;
+      max-height: 90vh;
+      overflow-y: auto;
     }
     
     #contextMenu.show {
@@ -195,357 +205,6 @@
       background: rgba(0, 0, 0, 0.1);
       margin: 4px 8px;
     }
-    
-    /* Modal styles */
-    #modal {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0, 0, 0, 0.6);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 2000;
-    }
-    
-    #modal.show {
-      display: flex;
-    }
-    
-    .modal-content {
-      background: white;
-      border-radius: 20px;
-      padding: 24px;
-      max-width: 500px;
-      width: 90%;
-      max-height: 80vh;
-      overflow-y: auto;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      animation: modalSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    @keyframes modalSlideIn {
-      from {
-        opacity: 0;
-        transform: translateY(20px) scale(0.95);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
-    }
-    
-    .modal-header {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 16px;
-      color: #1a1a1a;
-    }
-    
-    .modal-body {
-      font-size: 14px;
-      color: #4a4a4a;
-      line-height: 1.6;
-    }
-    
-    .modal-actions {
-      margin-top: 20px;
-      display: flex;
-      gap: 12px;
-      justify-content: flex-end;
-    }
-    
-    .modal-btn {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    
-    .modal-btn-primary {
-      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-      color: white;
-    }
-    
-    .modal-btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-    }
-    
-    .modal-btn-secondary {
-      background: #f0f0f0;
-      color: #4a4a4a;
-    }
-    
-    .modal-btn-secondary:hover {
-      background: #e0e0e0;
-    }
-    
-    /* Carousel styles */
-    .carousel-container {
-      position: relative;
-      width: 100%;
-      height: 300px;
-      background: #f5f5f5;
-      border-radius: 12px;
-      overflow: hidden;
-      margin: 16px 0;
-    }
-    
-    .carousel-image {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    
-    .carousel-nav {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      background: rgba(255, 255, 255, 0.9);
-      border: none;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-      z-index: 10;
-    }
-    
-    .carousel-nav:hover {
-      background: white;
-      transform: translateY(-50%) scale(1.1);
-    }
-    
-    .carousel-nav.prev {
-      left: 10px;
-    }
-    
-    .carousel-nav.next {
-      right: 10px;
-    }
-    
-    .carousel-nav:disabled {
-      opacity: 0.3;
-      cursor: not-allowed;
-    }
-    
-    .carousel-nav:disabled:hover {
-      transform: translateY(-50%) scale(1);
-    }
-    
-    .carousel-info {
-      position: absolute;
-      bottom: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
-      color: white;
-      padding: 6px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-    }
-    
-    .carousel-delete {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(255, 59, 48, 0.9);
-      color: white;
-      border: none;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-    }
-    
-    .carousel-delete:hover {
-      background: rgb(255, 59, 48);
-      transform: scale(1.1);
-    }
-    
-    .carousel-filename {
-      margin-top: 12px;
-      font-size: 12px;
-      color: #666;
-      text-align: center;
-      word-break: break-all;
-    }
-    
-    /* Session Time Picker Styles */
-    .session-time-container {
-      margin: 20px 0;
-    }
-    
-    .time-picker-group {
-      margin-bottom: 20px;
-    }
-    
-    .time-picker-label {
-      font-size: 14px;
-      font-weight: 600;
-      color: #1a1a1a;
-      margin-bottom: 10px;
-      display: block;
-    }
-    
-    .time-input {
-      width: 100%;
-      padding: 12px 16px;
-      border: 2px solid #e0e0e0;
-      border-radius: 10px;
-      font-size: 16px;
-      font-family: 'Geist', sans-serif;
-      transition: all 0.2s ease;
-    }
-    
-    .time-input:focus {
-      outline: none;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-    }
-    
-    .quick-hours {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
-      margin-top: 12px;
-    }
-    
-    .hour-btn {
-      padding: 10px;
-      border: 2px solid #e0e0e0;
-      background: white;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      color: #4a4a4a;
-    }
-    
-    .hour-btn:hover {
-      border-color: #3b82f6;
-      background: #f0f7ff;
-      color: #3b82f6;
-    }
-    
-    .hour-btn.selected {
-      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-      border-color: #1d4ed8;
-      color: white;
-    }
-    
-    .session-info {
-      margin-top: 16px;
-      padding: 12px;
-      background: #f0f7ff;
-      border-radius: 8px;
-      font-size: 13px;
-      color: #1d4ed8;
-    }
-    
-    .session-info strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-    
-    /* Settings Modal Styles */
-    .settings-grid {
-      display: grid;
-      gap: 16px;
-      margin: 20px 0;
-    }
-    
-    .settings-section {
-      padding: 16px;
-      background: #f8f9fa;
-      border-radius: 10px;
-      border-left: 4px solid #3b82f6;
-    }
-    
-    .settings-section-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: #1a1a1a;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .settings-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      font-size: 14px;
-    }
-    
-    .settings-label {
-      color: #4a4a4a;
-      font-weight: 500;
-    }
-    
-    .settings-value {
-      color: #1a1a1a;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-    
-    .status-badge.active {
-      background: #d1fae5;
-      color: #065f46;
-    }
-    
-    .status-badge.inactive {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-    
-    .status-badge.warning {
-      background: #fef3c7;
-      color: #92400e;
-    }
-    
-    .settings-divider {
-      height: 1px;
-      background: #e5e7eb;
-      margin: 8px 0;
-    }
-    
-    .session-age-display {
-      font-size: 13px;
-      color: #6b7280;
-      margin-top: 4px;
-    }
   </style>
 </head>
 <body>
@@ -577,46 +236,13 @@
       <span class="icon"><i data-lucide="external-link"></i></span>
       <span>Open Quelo.Tech</span>
     </div>
-    <div class="menu-item" data-action="syncStatus">
-      <span class="icon"><i data-lucide="refresh-cw"></i></span>
-      <span id="syncToggleText">Stop Syncing</span>
-    </div>
     <div class="menu-item" data-action="newSession">
       <span class="icon"><i data-lucide="clock"></i></span>
       <span>New Session</span>
     </div>
-    <div class="menu-separator"></div>
-    <div class="menu-item" data-action="settings">
-      <span class="icon"><i data-lucide="settings"></i></span>
-      <span>Settings</span>
-    </div>
-    <div class="menu-item" data-action="captures">
-      <span class="icon"><i data-lucide="image"></i></span>
-      <span>View Captures</span>
-    </div>
-    <div class="menu-item" data-action="saveNotes">
-      <span class="icon"><i data-lucide="save"></i></span>
-      <span>Save Notes</span>
-    </div>
-    <div class="menu-separator"></div>
     <div class="menu-item" data-action="close">
       <span class="icon"><i data-lucide="x"></i></span>
       <span>Close Overlay</span>
-    </div>
-    <div class="menu-item" data-action="quit">
-      <span class="icon"><i data-lucide="log-out"></i></span>
-      <span>Quit App</span>
-    </div>
-  </div>
-  
-  <div id="modal">
-    <div class="modal-content">
-      <div class="modal-header" id="modalTitle">Title</div>
-      <div class="modal-body" id="modalBody">Body content</div>
-      <div class="modal-actions">
-        <button class="modal-btn modal-btn-secondary" id="modalCancel">Cancel</button>
-        <button class="modal-btn modal-btn-primary" id="modalConfirm">Confirm</button>
-      </div>
     </div>
   </div>
   

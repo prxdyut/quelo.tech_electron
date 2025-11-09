@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FileItem, Settings, SyncStats, AuthStatus, Capture, UploadProgress } from '@/types';
+import type { FileItem, Settings, SyncStats, AuthStatus, Capture, UploadProgress, Session } from '@/types';
 import { config } from '@/config';
 
 interface AppState {
@@ -8,6 +8,7 @@ interface AppState {
   filteredFiles: FileItem[];
   searchQuery: string;
   dateRange: { from: Date | null; to: Date | null };
+  isLoadingFiles: boolean;
   
   // Stats
   stats: SyncStats;
@@ -22,16 +23,32 @@ interface AppState {
   // Captures
   captures: Capture[];
   selectedCaptures: Set<string>;
+  isLoadingCaptures: boolean;
+  
+  // Sessions
+  sessions: Session[];
+  isLoadingSessions: boolean;
+  currentSession: Session | null;
+  sessionFilters: {
+    status?: 'active' | 'ended';
+    subject?: string;
+    topic?: string;
+  };
+  sessionPagination: {
+    limit: number;
+    offset: number;
+  };
   
   // UI State
-  currentView: 'files' | 'captures' | 'settings';
-  captureTab: 'screenshots' | 'recordings';
+  currentView: 'files' | 'captures' | 'sessions' | 'settings';
+  captureTab: 'screenshots' | 'recordings' | 'sessions';
   isRecording: boolean;
   recordingState: 'idle' | 'recording' | 'paused';
   uploadProgress: UploadProgress | null;
   
   // Actions
   setFiles: (files: FileItem[]) => void;
+  setLoadingFiles: (loading: boolean) => void;
   setSearchQuery: (query: string) => void;
   setDateRange: (range: { from: Date | null; to: Date | null }) => void;
   applyFilters: () => void;
@@ -40,11 +57,17 @@ interface AppState {
   setAuthStatus: (status: AuthStatus) => void;
   setAuthLoading: (loading: boolean) => void;
   setCaptures: (captures: Capture[]) => void;
+  setLoadingCaptures: (loading: boolean) => void;
   toggleCaptureSelection: (path: string) => void;
   clearCaptureSelection: () => void;
   selectAllCaptures: (type?: 'screenshot' | 'recording') => void;
-  setCurrentView: (view: 'files' | 'captures' | 'settings') => void;
-  setCaptureTab: (tab: 'screenshots' | 'recordings') => void;
+  setSessions: (sessions: Session[]) => void;
+  setLoadingSessions: (loading: boolean) => void;
+  setCurrentSession: (session: Session | null) => void;
+  setSessionFilters: (filters: { status?: 'active' | 'ended'; subject?: string; topic?: string }) => void;
+  setSessionPagination: (pagination: { limit: number; offset: number }) => void;
+  setCurrentView: (view: 'files' | 'captures' | 'sessions' | 'settings') => void;
+  setCaptureTab: (tab: 'screenshots' | 'recordings' | 'sessions') => void;
   setRecordingState: (state: 'idle' | 'recording' | 'paused') => void;
   setUploadProgress: (progress: UploadProgress | null) => void;
 }
@@ -54,6 +77,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   filteredFiles: [],
   searchQuery: '',
   dateRange: { from: null, to: null },
+  isLoadingFiles: false,
   
   stats: {
     totalFiles: 0,
@@ -84,9 +108,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   
   captures: [],
   selectedCaptures: new Set(),
+  isLoadingCaptures: false,
+  
+  sessions: [],
+  isLoadingSessions: false,
+  currentSession: null,
+  sessionFilters: {
+    status: undefined,
+    subject: undefined,
+    topic: undefined,
+  },
+  sessionPagination: {
+    limit: 50,
+    offset: 0,
+  },
   
   currentView: 'files',
-  captureTab: 'screenshots',
+  captureTab: 'sessions',
   isRecording: false,
   recordingState: 'idle',
   uploadProgress: null,
@@ -95,6 +133,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ files });
     get().applyFilters();
   },
+  
+  setLoadingFiles: (isLoadingFiles) => set({ isLoadingFiles }),
   
   setSearchQuery: (query) => {
     set({ searchQuery: query });
@@ -139,6 +179,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAuthStatus: (authStatus) => set({ authStatus }),
   setAuthLoading: (isAuthLoading) => set({ isAuthLoading }),
   setCaptures: (captures) => set({ captures }),
+  setLoadingCaptures: (isLoadingCaptures) => set({ isLoadingCaptures }),
+  setSessions: (sessions) => set({ sessions }),
+  setLoadingSessions: (isLoadingSessions) => set({ isLoadingSessions }),
+  setCurrentSession: (currentSession) => set({ currentSession }),
+  setSessionFilters: (filters) => set((state) => ({ sessionFilters: { ...state.sessionFilters, ...filters } })),
+  setSessionPagination: (pagination) => set({ sessionPagination: pagination }),
   
   toggleCaptureSelection: (path) => {
     const selected = new Set(get().selectedCaptures);

@@ -44,13 +44,23 @@ class AudioRecordingService {
   }
 
   /**
+   * Get bearer token (similar to CaptureService)
+   */
+  async getToken() {
+    if (!this.bearerToken) {
+      throw new Error('Not authenticated. Please sign in with Clerk first.');
+    }
+    return this.bearerToken;
+  }
+
+  /**
    * Initialize a new recording session
    * @param {string} recordingId - Unique identifier for the recording
    * @param {object} options - Recording options (title, mimeType)
    * @returns {object} Recording metadata
    */
   async startRecording(recordingId, options = {}) {
-    console.log(`[AudioRecording] START - recordingId: ${recordingId}, options:`, options);
+    console.log(`[AudioRecordingService] START - recordingId: ${recordingId}, options:`, options);
     
     const metadata = {
       recordingId,
@@ -70,7 +80,7 @@ class AudioRecordingService {
     const recordingDir = path.join(this.capturesPath, 'recordings', recordingId);
     await fs.mkdir(recordingDir, { recursive: true });
 
-    console.log(`[AudioRecording] Recording started successfully - Dir: ${recordingDir}`);
+    console.log(`[AudioRecordingService] Recording started successfully - Dir: ${recordingDir}`);
     return metadata;
   }
 
@@ -82,12 +92,12 @@ class AudioRecordingService {
    * @returns {object} Chunk save result
    */
   async saveChunk(recordingId, chunkData, chunkNumber) {
-    console.log(`[AudioRecording] SAVE CHUNK - ID: ${recordingId}, Chunk #${chunkNumber}, Size: ${chunkData.length} bytes`);
+    console.log(`[AudioRecordingService] SAVE CHUNK - ID: ${recordingId}, Chunk #${chunkNumber}, Size: ${chunkData.length} bytes`);
     
     try {
       const metadata = this.activeRecordings.get(recordingId);
       if (!metadata) {
-        console.error(`[AudioRecording] Recording not found: ${recordingId}`);
+        console.error(`[AudioRecordingService] Recording not found: ${recordingId}`);
         throw new Error(`Recording ${recordingId} not found or not active`);
       }
 
@@ -111,16 +121,16 @@ class AudioRecordingService {
       metadata.totalSize += chunkData.length;
       metadata.lastChunkTime = new Date().toISOString();
 
-      console.log(`[AudioRecording] Chunk saved locally ✓ Total chunks: ${metadata.chunks.length}, Total size: ${metadata.totalSize} bytes`);
+      console.log(`[AudioRecordingService] Chunk saved locally ✓ Total chunks: ${metadata.chunks.length}, Total size: ${metadata.totalSize} bytes`);
       
       // Upload to backend
       const uploadSuccess = await this.uploadChunkToBackend(recordingId, chunkData, chunkNumber, metadata);
       
       if (uploadSuccess) {
-        console.log(`[AudioRecording] Chunk ${chunkNumber} uploaded to backend ✓`);
+        console.log(`[AudioRecordingService] Chunk ${chunkNumber} uploaded to backend ✓`);
         chunkInfo.uploadedToBackend = true;
       } else {
-        console.warn(`[AudioRecording] Chunk ${chunkNumber} failed to upload to backend (saved locally)`);
+        console.warn(`[AudioRecordingService] Chunk ${chunkNumber} failed to upload to backend (saved locally)`);
         chunkInfo.uploadedToBackend = false;
       }
       
@@ -132,7 +142,7 @@ class AudioRecordingService {
         uploadedToBackend: uploadSuccess
       };
     } catch (error) {
-      console.error(`[AudioRecording] CHUNK ERROR:`, error);
+      console.error(`[AudioRecordingService] CHUNK ERROR:`, error);
       return {
         success: false,
         error: error.message
@@ -150,17 +160,12 @@ class AudioRecordingService {
    */
   async uploadChunkToBackend(recordingId, chunkData, chunkNumber, metadata) {
     try {
-      if (!this.bearerToken) {
-        console.warn('[AudioRecording] No auth token, skipping backend upload');
-        return false;
-      }
-
-      const token = this.bearerToken;
+      const token = await this.getToken();
 
       // Session ID is required
       const sessionId = this.getSessionId();
       if (!sessionId) {
-        console.error('[AudioRecording] sessionId is required but not available');
+        console.error('[AudioRecordingService] sessionId is required but not available');
         throw new Error('Session ID is required for chunk upload');
       }
 
@@ -173,12 +178,13 @@ class AudioRecordingService {
       formData.append('chunkNumber', chunkNumber.toString());
       formData.append('mimeType', metadata.mimeType);
       formData.append('title', metadata.title);
-      formData.append('sessionId', sessionId);
       
-      console.log(`[AudioRecording] Including sessionId in chunk upload: ${sessionId}`);
+      // Add session ID (required)
+      formData.append('sessionId', sessionId);
+      console.log(`[AudioRecordingService] Including sessionId in chunk upload: ${sessionId}`);
 
       const url = `${this.apiBaseUrl}/api/recordings/chunk`;
-      console.log(`[AudioRecording] Uploading chunk to: ${url}`);
+      console.log(`[AudioRecordingService] Uploading chunk #${chunkNumber} to: ${url}`);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -191,15 +197,15 @@ class AudioRecordingService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[AudioRecording] Upload failed: ${response.status} - ${errorText}`);
+        console.error(`[AudioRecordingService] Upload failed: ${response.status} - ${errorText}`);
         return false;
       }
 
       const result = await response.json();
-      console.log(`[AudioRecording] Backend response:`, result);
+      console.log(`[AudioRecordingService] Chunk #${chunkNumber} uploaded successfully`);
       return result.success === true;
     } catch (error) {
-      console.error('[AudioRecording] Upload to backend failed:', error);
+      console.error('[AudioRecordingService] Upload to backend failed:', error);
       return false;
     }
   }
@@ -211,12 +217,12 @@ class AudioRecordingService {
    * @returns {object} Final recording result
    */
   async stopRecording(recordingId, totalDuration = 0) {
-    console.log(`[AudioRecording] STOP - ID: ${recordingId}, Duration: ${totalDuration}s`);
+    console.log(`[AudioRecordingService] STOP - ID: ${recordingId}, Duration: ${totalDuration}s`);
     
     try {
       const metadata = this.activeRecordings.get(recordingId);
       if (!metadata) {
-        console.error(`[AudioRecording] Recording not found: ${recordingId}`);
+        console.error(`[AudioRecordingService] Recording not found: ${recordingId}`);
         throw new Error(`Recording ${recordingId} not found`);
       }
 
@@ -230,7 +236,7 @@ class AudioRecordingService {
       // Remove from active recordings
       this.activeRecordings.delete(recordingId);
 
-      console.log(`[AudioRecording] ✓ Recording stopped: ${metadata.chunks.length} chunks, ${metadata.totalSize} bytes, ${totalDuration}s`);
+      console.log(`[AudioRecordingService] ✓ Recording stopped: ${metadata.chunks.length} chunks, ${metadata.totalSize} bytes, ${totalDuration}s`);
       
       // Notify backend that recording is complete (backend will concatenate)
       await this.finalizeRecordingOnBackend(recordingId, metadata);
@@ -238,13 +244,14 @@ class AudioRecordingService {
       return {
         success: true,
         recordingId,
+        fileName: metadata.title,
         totalChunks: metadata.chunks.length,
         totalSize: metadata.totalSize,
         totalDuration: metadata.totalDuration,
         message: 'Recording uploaded to backend. Will be processed in ~10 minutes.'
       };
     } catch (error) {
-      console.error(`[AudioRecording] ✗ STOP ERROR:`, error);
+      console.error(`[AudioRecordingService] ✗ STOP ERROR:`, error);
       
       // Update status to failed
       const metadata = this.activeRecordings.get(recordingId);
@@ -281,7 +288,7 @@ class AudioRecordingService {
         try {
           await fs.unlink(chunk.path);
         } catch (err) {
-          console.warn(`[AudioRecording] Could not delete chunk:`, err.message);
+          console.warn(`[AudioRecordingService] Could not delete chunk:`, err.message);
         }
       }
 
@@ -293,16 +300,14 @@ class AudioRecordingService {
       }
 
       this.activeRecordings.delete(recordingId);
-      console.log(`[AudioRecording] Cancelled recording: ${recordingId}`);
-
+      console.log(`[AudioRecordingService] Cancelled recording: ${recordingId}`);
+      
       return { success: true };
     } catch (error) {
-      console.error(`[AudioRecording] Error cancelling recording:`, error);
+      console.error(`[AudioRecordingService] Error cancelling recording:`, error);
       return { success: false, error: error.message };
     }
-  }
-
-  /**
+  }  /**
    * Get all recordings (completed)
    * @returns {array} List of recording metadata
    */
@@ -317,38 +322,35 @@ class AudioRecordingService {
 
       const data = await fs.readFile(metadataPath, 'utf8');
       const allRecordings = JSON.parse(data);
-      console.log(`[AudioRecording] Retrieved ${allRecordings.length} recordings from metadata`);
+      console.log(`[AudioRecordingService] Retrieved ${allRecordings.length} recordings from metadata`);
       // Return only completed recordings, sorted by date (newest first)
       return allRecordings
         .filter(r => r.status === 'completed')
         .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
     } catch (error) {
-      console.error('[AudioRecording] Error getting recordings:', error);
+      console.error('[AudioRecordingService] Error getting recordings:', error);
       return [];
     }
   }
 
   /**
-   * Fetch recordings from backend API
-   * @param {object} options - Query options (limit, offset, status)
+   * Fetch recordings from backend API (similar to CaptureService.getAllCaptures)
+   * @param {object} options - Query options (limit, offset, status, sortBy, order)
    * @returns {Promise<object>} - List of recordings and total count
    */
   async fetchRecordingsFromBackend(options = {}) {
     try {
-      if (!this.bearerToken) {
-        console.warn('[AudioRecording] No auth token, cannot fetch from backend');
-        return { success: false, recordings: [], total: 0 };
-      }
-
-      const token = this.bearerToken;
+      const token = await this.getToken();
 
       const queryParams = new URLSearchParams();
       if (options.status) queryParams.append('status', options.status);
       if (options.limit) queryParams.append('limit', options.limit);
       if (options.offset) queryParams.append('offset', options.offset);
+      if (options.sortBy) queryParams.append('sortBy', options.sortBy);
+      if (options.order) queryParams.append('order', options.order);
 
       const url = `${this.apiBaseUrl}/api/recordings?${queryParams.toString()}`;
-      console.log(`[AudioRecording] Fetching recordings from backend: ${url}`);
+      console.log(`[AudioRecordingService] Fetching recordings from backend: ${url}`);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -359,13 +361,12 @@ class AudioRecordingService {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[AudioRecording] Fetch failed: ${response.status} - ${errorText}`);
-        return { success: false, recordings: [], total: 0 };
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Fetch failed: ${response.status} ${response.statusText}`);
       }
 
       const result = await response.json();
-      console.log(`[AudioRecording] Fetched ${result.recordings?.length || 0} recordings from backend`);
+      console.log(`[AudioRecordingService] Fetched ${result.recordings?.length || 0} recordings from backend`);
 
       return {
         success: true,
@@ -373,8 +374,13 @@ class AudioRecordingService {
         total: result.total || 0
       };
     } catch (error) {
-      console.error('[AudioRecording] Error fetching recordings from backend:', error);
-      return { success: false, recordings: [], total: 0, error: error.message };
+      console.error('[AudioRecordingService] Fetch error:', error);
+      return {
+        success: false,
+        error: error.message,
+        recordings: [],
+        total: 0
+      };
     }
   }
 
@@ -395,7 +401,7 @@ class AudioRecordingService {
   }
 
   /**
-   * Delete a recording
+   * Delete a recording (both local and backend)
    * @param {string} recordingId - Recording identifier
    */
   async deleteRecording(recordingId) {
@@ -420,11 +426,50 @@ class AudioRecordingService {
         'utf8'
       );
 
-      console.log(`[AudioRecording] Deleted recording: ${recordingId}`);
+      console.log(`[AudioRecordingService] Deleted recording: ${recordingId}`);
       return { success: true };
     } catch (error) {
-      console.error('[AudioRecording] Error deleting recording:', error);
+      console.error('[AudioRecordingService] Error deleting recording:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Delete a recording from backend (similar to CaptureService.deleteCapture)
+   * @param {string} recordingId - Recording identifier
+   */
+  async deleteRecordingFromBackend(recordingId) {
+    try {
+      const token = await this.getToken();
+      
+      console.log(`[AudioRecordingService] Deleting recording from backend: ${recordingId}`);
+      
+      const response = await fetch(`${this.apiBaseUrl}/api/recordings/${recordingId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Delete failed: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`[AudioRecordingService] Backend delete successful: ${recordingId}`);
+      
+      return {
+        success: true,
+        message: result.message || 'Recording deleted successfully'
+      };
+    } catch (error) {
+      console.error('[AudioRecordingService] Backend delete error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
@@ -459,7 +504,7 @@ class AudioRecordingService {
         'utf8'
       );
     } catch (error) {
-      console.error('[AudioRecording] Error saving metadata:', error);
+      console.error('[AudioRecordingService] Error saving metadata:', error);
     }
   }
 
@@ -487,15 +532,17 @@ class AudioRecordingService {
    */
   async finalizeRecordingOnBackend(recordingId, metadata) {
     try {
-      if (!this.bearerToken) {
-        console.warn('[AudioRecording] No auth token, skipping backend finalization');
-        return;
+      const token = await this.getToken();
+
+      // Session ID is required
+      const sessionId = this.getSessionId();
+      if (!sessionId) {
+        console.error('[AudioRecordingService] sessionId is required but not available');
+        throw new Error('Session ID is required for recording finalization');
       }
 
-      const token = this.bearerToken;
-
       const url = `${this.apiBaseUrl}/api/recordings/finalize`;
-      console.log(`[AudioRecording] Finalizing recording on backend: ${url}`);
+      console.log(`[AudioRecordingService] Finalizing recording on backend: ${url}`);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -509,20 +556,21 @@ class AudioRecordingService {
           totalDuration: metadata.totalDuration,
           totalSize: metadata.totalSize,
           title: metadata.title,
-          mimeType: metadata.mimeType
+          mimeType: metadata.mimeType,
+          sessionId: sessionId
         })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[AudioRecording] Finalization failed: ${response.status} - ${errorText}`);
+        console.error(`[AudioRecordingService] Finalization failed: ${response.status} - ${errorText}`);
         return;
       }
 
       const result = await response.json();
-      console.log(`[AudioRecording] Backend finalization result:`, result);
+      console.log(`[AudioRecordingService] Recording finalized successfully`);
     } catch (error) {
-      console.error('[AudioRecording] Finalization on backend failed:', error);
+      console.error('[AudioRecordingService] Finalization on backend failed:', error);
     }
   }
 
@@ -556,7 +604,7 @@ class AudioRecordingService {
           const oneHourMs = 60 * 60 * 1000;
           
           if (ageMs > oneHourMs && !this.activeRecordings.has(dir)) {
-            console.log(`[AudioRecording] Cleaning up stale recording: ${dir}`);
+            console.log(`[AudioRecordingService] Cleaning up stale recording: ${dir}`);
             
             // Delete all files in directory
             const files = await fs.readdir(dirPath);
@@ -570,7 +618,7 @@ class AudioRecordingService {
         }
       }
     } catch (error) {
-      console.error('[AudioRecording] Error cleaning up stale recordings:', error);
+      console.error('[AudioRecordingService] Error cleaning up stale recordings:', error);
     }
   }
 }

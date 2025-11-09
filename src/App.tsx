@@ -1,11 +1,10 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/store';
-import { CapturesView } from '@/views/CapturesView';
+import { View } from './View';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { UploadProgressDialog } from '@/components/UploadProgressDialog';
 import { AuthRequired } from '@/components/AuthRequired';
 import { Toaster } from 'sonner';
-import { toast } from 'sonner';
 
 function App() {
   const { 
@@ -15,7 +14,10 @@ function App() {
     setStats, 
     setAuthStatus,
     setAuthLoading,
-    setUploadProgress 
+    setUploadProgress,
+    setLoadingFiles,
+    currentSession,
+    setCurrentSession,
   } = useAppStore();
 
   useEffect(() => {
@@ -51,14 +53,21 @@ function App() {
 
     initAuth();
 
-    initAuth();
-
     // Load initial files
-    window.electronAPI.getWatchedFiles().then((files) => {
-      setFiles(files);
-    });
+    const loadFiles = async () => {
+      setLoadingFiles(true);
+      try {
+        const files = await window.electronAPI.getWatchedFiles();
+        setFiles(files);
+      } finally {
+        setLoadingFiles(false);
+      }
+    };
 
-    // Listen for file updates
+    loadFiles();
+
+    // Lis
+    // ten for file updates
     window.electronAPI.onInitialFiles((files) => {
       setFiles(files);
     });
@@ -72,7 +81,40 @@ function App() {
     window.electronAPI.onUploadProgress((progress) => {
       setUploadProgress(progress);
     });
-  }, [setFiles, setStats, setAuthStatus, setAuthLoading, setUploadProgress]);
+
+    // Listen for session selection
+    // @ts-ignore - onSessionSelected will be available after preload
+    if (window.electronAPI?.session?.onSessionSelected) {
+      // @ts-ignore
+      window.electronAPI.session.onSessionSelected((session: any) => {
+        console.log('[App] Session selected:', session);
+        setCurrentSession(session);
+      });
+    }
+  }, [setFiles, setStats, setAuthStatus, setAuthLoading, setUploadProgress, setLoadingFiles, setCurrentSession]);
+
+  // Load sessions when authenticated
+  useEffect(() => {
+    if (authStatus.isAuthenticated && currentSession === null) {
+      // Show session overlay
+      window.electronAPI.sessionOverlay?.show();
+    }
+  }, [authStatus.isAuthenticated]);
+
+  // Sync current session ID to main process
+  useEffect(() => {
+    const syncSessionToMain = async () => {
+      try {
+        // @ts-ignore
+        await window.electronAPI.session.setCurrent(currentSession?.sessionId || null);
+        console.log('[App] Current session ID synced to main process:', currentSession?.sessionId);
+      } catch (error) {
+        console.error('[App] Failed to sync session to main process:', error);
+      }
+    };
+    
+    syncSessionToMain();
+  }, [currentSession]);
 
   // Handle successful authentication
   const handleAuthSuccess = async () => {
@@ -104,12 +146,14 @@ function App() {
         <>
           <div className="flex-1 flex flex-col overflow-hidden">
             <main className="flex-1 overflow-auto">
-              <CapturesView />
+              <View />
             </main>
           </div>
 
           <SettingsDialog />
           <UploadProgressDialog />
+
+          {/* Session Selection is now displayed as an overlay window */}
         </>
       )}
       
