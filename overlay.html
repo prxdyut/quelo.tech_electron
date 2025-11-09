@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenshot Overlay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    
+    #widget {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      border: 4px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      -webkit-app-region: no-drag;
+      user-select: none;
+    }
+    
+    #widget:hover {
+      transform: scale(1.1);
+      box-shadow: 0 12px 48px rgba(59, 130, 246, 0.5);
+    }
+    
+    #widget.capturing {
+      animation: capture 0.4s ease;
+    }
+    
+    #widget.long-pressing {
+      transform: scale(0.95);
+    }
+    
+    #menuButton {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.95);
+      border: 2px solid rgba(59, 130, 246, 0.3);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+    
+    #widget:hover #menuButton {
+      display: flex;
+    }
+    
+    #menuButton:hover {
+      background: white;
+      transform: scale(1.15);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    }
+    
+    #menuButton:active {
+      transform: scale(0.95);
+    }
+    
+    @keyframes capture {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+    
+    #tooltip {
+      position: fixed;
+      bottom: 100px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    #tooltip.show {
+      opacity: 1;
+    }
+    
+    #status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 24px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    
+    #status.show {
+      opacity: 1;
+    }
+    
+    #contextMenu {
+      position: fixed;
+      background: rgba(255, 255, 255, 0.98);
+      backdrop-filter: blur(20px);
+      border-radius: 16px;
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+      padding: 8px;
+      min-width: 220px;
+      opacity: 0;
+      transform: scale(0.9);
+      pointer-events: none;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 1000;
+    }
+    
+    #contextMenu.show {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: all;
+    }
+    
+    .menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      font-size: 14px;
+      color: #1a1a1a;
+      font-weight: 500;
+    }
+    
+    .menu-item:hover {
+      background: rgba(59, 130, 246, 0.1);
+    }
+    
+    .menu-item:active {
+      background: rgba(59, 130, 246, 0.2);
+    }
+    
+    .menu-item .icon {
+      font-size: 20px;
+      width: 24px;
+      height: 24px;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .menu-item .icon svg {
+      width: 20px;
+      height: 20px;
+    }
+    
+    .menu-separator {
+      height: 1px;
+      background: rgba(0, 0, 0, 0.1);
+      margin: 4px 8px;
+    }
+    
+    /* Modal styles */
+    #modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    
+    #modal.show {
+      display: flex;
+    }
+    
+    .modal-content {
+      background: white;
+      border-radius: 20px;
+      padding: 24px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: modalSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    @keyframes modalSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+    
+    .modal-header {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #1a1a1a;
+    }
+    
+    .modal-body {
+      font-size: 14px;
+      color: #4a4a4a;
+      line-height: 1.6;
+    }
+    
+    .modal-actions {
+      margin-top: 20px;
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+    
+    .modal-btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .modal-btn-primary {
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      color: white;
+    }
+    
+    .modal-btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    }
+    
+    .modal-btn-secondary {
+      background: #f0f0f0;
+      color: #4a4a4a;
+    }
+    
+    .modal-btn-secondary:hover {
+      background: #e0e0e0;
+    }
+    
+    /* Carousel styles */
+    .carousel-container {
+      position: relative;
+      width: 100%;
+      height: 300px;
+      background: #f5f5f5;
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 16px 0;
+    }
+    
+    .carousel-image {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    
+    .carousel-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255, 255, 255, 0.9);
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+    
+    .carousel-nav:hover {
+      background: white;
+      transform: translateY(-50%) scale(1.1);
+    }
+    
+    .carousel-nav.prev {
+      left: 10px;
+    }
+    
+    .carousel-nav.next {
+      right: 10px;
+    }
+    
+    .carousel-nav:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    
+    .carousel-nav:disabled:hover {
+      transform: translateY(-50%) scale(1);
+    }
+    
+    .carousel-info {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+    
+    .carousel-delete {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255, 59, 48, 0.9);
+      color: white;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+    
+    .carousel-delete:hover {
+      background: rgb(255, 59, 48);
+      transform: scale(1.1);
+    }
+    
+    .carousel-filename {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+      word-break: break-all;
+    }
+    
+    /* Session Time Picker Styles */
+    .session-time-container {
+      margin: 20px 0;
+    }
+    
+    .time-picker-group {
+      margin-bottom: 20px;
+    }
+    
+    .time-picker-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 10px;
+      display: block;
+    }
+    
+    .time-input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 16px;
+      font-family: 'Geist', sans-serif;
+      transition: all 0.2s ease;
+    }
+    
+    .time-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .quick-hours {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    .hour-btn {
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      color: #4a4a4a;
+    }
+    
+    .hour-btn:hover {
+      border-color: #3b82f6;
+      background: #f0f7ff;
+      color: #3b82f6;
+    }
+    
+    .hour-btn.selected {
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      border-color: #1d4ed8;
+      color: white;
+    }
+    
+    .session-info {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f0f7ff;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #1d4ed8;
+    }
+    
+    .session-info strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    
+    /* Settings Modal Styles */
+    .settings-grid {
+      display: grid;
+      gap: 16px;
+      margin: 20px 0;
+    }
+    
+    .settings-section {
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #3b82f6;
+    }
+    
+    .settings-section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+    
+    .settings-label {
+      color: #4a4a4a;
+      font-weight: 500;
+    }
+    
+    .settings-value {
+      color: #1a1a1a;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    
+    .status-badge.active {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .status-badge.inactive {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .status-badge.warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    
+    .settings-divider {
+      height: 1px;
+      background: #e5e7eb;
+      margin: 8px 0;
+    }
+    
+    .session-age-display {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="tooltip">Capture Screen</div>
+  <div id="status"></div>
+  
+  <div id="widget" title="Capture Screen">
+    <i data-lucide="camera" style="width: 36px; height: 36px; color: white;"></i>
+    <div id="menuButton" title="Open Menu">
+      <i data-lucide="more-vertical" style="width: 14px; height: 14px;"></i>
+    </div>
+  </div>
+  
+  <div id="contextMenu">
+    <div class="menu-item" data-action="capture">
+      <span class="icon"><i data-lucide="camera"></i></span>
+      <span>Capture Screen</span>
+    </div>
+    <div class="menu-item" data-action="startRecording" id="recordingMenuItem">
+      <span class="icon"><i data-lucide="mic"></i></span>
+      <span id="recordingMenuText">Start Recording</span>
+    </div>
+    <div class="menu-separator"></div>
+    <div class="menu-item" data-action="openApp">
+      <span class="icon"><i data-lucide="home"></i></span>
+      <span>Open App</span>
+    </div>
+    <div class="menu-item" data-action="openQuelo">
+      <span class="icon"><i data-lucide="external-link"></i></span>
+      <span>Open Quelo.Tech</span>
+    </div>
+    <div class="menu-item" data-action="syncStatus">
+      <span class="icon"><i data-lucide="refresh-cw"></i></span>
+      <span id="syncToggleText">Stop Syncing</span>
+    </div>
+    <div class="menu-item" data-action="newSession">
+      <span class="icon"><i data-lucide="clock"></i></span>
+      <span>New Session</span>
+    </div>
+    <div class="menu-separator"></div>
+    <div class="menu-item" data-action="settings">
+      <span class="icon"><i data-lucide="settings"></i></span>
+      <span>Settings</span>
+    </div>
+    <div class="menu-item" data-action="captures">
+      <span class="icon"><i data-lucide="image"></i></span>
+      <span>View Captures</span>
+    </div>
+    <div class="menu-item" data-action="saveNotes">
+      <span class="icon"><i data-lucide="save"></i></span>
+      <span>Save Notes</span>
+    </div>
+    <div class="menu-separator"></div>
+    <div class="menu-item" data-action="close">
+      <span class="icon"><i data-lucide="x"></i></span>
+      <span>Close Overlay</span>
+    </div>
+    <div class="menu-item" data-action="quit">
+      <span class="icon"><i data-lucide="log-out"></i></span>
+      <span>Quit App</span>
+    </div>
+  </div>
+  
+  <div id="modal">
+    <div class="modal-content">
+      <div class="modal-header" id="modalTitle">Title</div>
+      <div class="modal-body" id="modalBody">Body content</div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="modalCancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="modalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="overlay-script.js"></script>
+  <script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+  </script>
+</body>
+</html>
